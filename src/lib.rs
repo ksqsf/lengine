@@ -6,6 +6,7 @@ pub type Offset = u64;
 pub mod index;
 pub mod log;
 pub mod engine;
+pub mod flex;
 
 pub use crate::index::Index;
 pub use crate::log::Log;
