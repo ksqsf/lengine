@@ -2,17 +2,29 @@
 //!
 //! This mod contains interval tree implemented as a red-black tree.
 //!
-//! It supports:
+//! It features:
 //!
 //! * fast query about overlapping intervals
 //! * interval split and merge
-//!
-//! It's assumed that all intervals don't overlap with each other.
 
 #![allow(unused)]
 
 use std::cmp::Ordering::*;
 use slab::Slab;
+
+/// This trait defines a merge operator, which is used to merge a pair
+/// of values of the same type into a single value.
+pub trait Merge {
+    fn merge(self, rhs: Self) -> Self;
+}
+
+/// This trait defines a split operator, which is used to split a
+/// value into a pair of values of the same type.
+pub trait Split: Sized {
+    type Position;
+
+    fn split(self, pos: Self::Position) -> (Self, Self);
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum Color {
@@ -21,7 +33,7 @@ enum Color {
 }
 use Color::*;
 
-pub type Index = u32;
+pub type Index = usize;
 
 pub enum FindResult {
     Hit(Index),
@@ -38,7 +50,7 @@ pub enum FindKey {
 #[derive(Clone)]
 pub struct IntervalTree<K, V>
 where
-    K: Eq + Ord + Copy + std::fmt::Display,
+    K: Eq + Ord + Copy,
     V: Clone,
 {
     root: Option<Index>,
@@ -49,7 +61,7 @@ where
 #[derive(Clone)]
 struct Node<K, V>
 where
-    K: Eq + Ord + Copy + std::fmt::Display,
+    K: Eq + Ord + Copy,
     V: Clone,
 {
     color: Color,
@@ -64,7 +76,7 @@ where
 
 impl<K,V> IntervalTree<K,V>
 where
-    K: Eq + Ord + Copy + std::fmt::Display,
+    K: Eq + Ord + Copy,
     V: Clone,
 {
     pub fn new() -> IntervalTree<K,V> {
@@ -78,19 +90,26 @@ where
         }
     }
 
+    /// Insert a new interval; if there's an overlapping, merge with
+    /// it.
     pub fn insert(&mut self, a: K, b: K, value: V) {
+        self.insert_nonoverlapping(a, b, value)
+    }
+
+    /// Insert a new interval into this tree.
+    pub fn insert_nonoverlapping(&mut self, a: K, b: K, value: V) {
         assert!(b > a);
 
         let mut node = Node::new(a, b, value);
         let mut id;
 
-        match self.root() {
+        match self.root_mut() {
             None => {
                 id = self.tree.insert(node) as Index;
                 self.root = Some(id);
             }
             Some((root_id, root)) => {
-                let find = root.find_key(root_id, &self.tree, a);
+                let find = self.find_key_update(root_id, a, b);
                 id = self.tree.insert(node) as Index;
                 match find {
                     FindKey::Left(parent_id) => {
@@ -111,15 +130,38 @@ where
         }
 
         self.repair_after_insert(id);
-
-        while self.node(id).p.is_some() {
-            id = self.node(id).p.unwrap();
-            self.update(id);
-        }
     }
 
     pub fn remove(&mut self) {
         unimplemented!()
+    }
+
+    /// Find a node by key, and update the info along the path.  It
+    /// either finds a node with the specified key, or, if such node
+    /// doesn't exist, finds a node which is to be the parent of such
+    /// node.
+    fn find_key_update(&mut self, mut cur: Index, a: K, b: K) -> FindKey {
+        loop {
+            let node = self.node_mut(cur);
+            node.m = node.m.max(b);
+            match a.cmp(&node.a) {
+                Equal => {
+                    break FindKey::This(cur)
+                }
+                Greater if node.r.is_some() => {
+                    cur = node.r.unwrap();
+                }
+                Greater => {
+                    break FindKey::Right(cur)
+                }
+                Less if node.l.is_some() => {
+                    cur = node.l.unwrap();
+                }
+                Less => {
+                    break FindKey::Left(cur)
+                }
+            }
+        }
     }
 
     pub fn find(&self, a: K, b: K) -> FindResult {
@@ -167,7 +209,6 @@ where
                         p = n;
                         n = self.node(n).r.unwrap();
                     }
-
                     // Move the grandparent down, the parent up
                     if Some(n) == self.node(p).l {
                         self.rotate_right(g);
@@ -263,7 +304,8 @@ where
             .and_then(|p| self.sibling_and_parent(p))
     }
 
-    fn update(&mut self, n: Index) {
+    /// Returns true if the value is updated.
+    fn update(&mut self, n: Index) -> bool {
         let node = self.node(n);
         let mut m = node.b;
         if let Some(l) = node.l {
@@ -272,13 +314,18 @@ where
         if let Some(r) = node.r {
             m = m.max(self.node(r).m);
         }
-        self.node_mut(n).m = m;
+        if self.node_mut(n).m != m {
+            self.node_mut(n).m = m;
+            true
+        } else {
+            false
+        }
     }
 }
 
 impl<K,V> Node<K,V>
 where
-    K: Eq + Ord + Copy + std::fmt::Display,
+    K: Eq + Ord + Copy,
     V: Clone,
 {
     fn new(a: K, b: K, value: V) -> Node<K,V> {
@@ -296,34 +343,6 @@ where
     /// of self in `tree`.
     fn find(&self, index: Index, tree: &Slab<Node<K,V>>, a: K, b: K) -> FindResult {
         unimplemented!()
-    }
-
-    /// Find a node by key.  It either finds a node with the specified
-    /// key, or, if such node doesn't exist, finds a node which is to
-    /// be the parent of such node.
-    fn find_key(&self, index: Index, tree: &Slab<Node<K,V>>, a: K) -> FindKey {
-        let mut cur = self;
-        let mut index = index;
-        loop {
-            match a.cmp(&cur.a) {
-                Equal => {
-                    break FindKey::This(index)
-                }
-                Greater if cur.r.is_some() => {
-                    index = cur.r.unwrap();
-                }
-                Greater => {
-                    break FindKey::Right(index)
-                }
-                Less if cur.l.is_some() => {
-                    index = cur.l.unwrap();
-                }
-                Less => {
-                    break FindKey::Left(index)
-                }
-            }
-            cur = &tree[index as usize];
-        }
     }
 }
 
@@ -349,9 +368,7 @@ mod tests {
         if t.root.is_none() {
             return
         }
-
         count_black(t, t.root);
-
         let mut found_root = false;
         for (i, node) in t.tree.iter() {
             // Root check
@@ -398,7 +415,7 @@ mod tests {
     }
 
     fn count_black<K,V>(t: &IntervalTree<K,V>, cur: Option<Index>) -> u32
-    where K: Ord + Copy + Eq + std::fmt::Display, V: Clone,
+    where K: Ord + Copy + Eq, V: Clone,
     {
         match cur {
             None => 1,
@@ -463,7 +480,7 @@ mod tests {
 
         let mut rng = thread_rng();
         let mut xs: Vec<_> = (0..10000).collect();
-        //xs.shuffle(&mut rng);
+        xs.shuffle(&mut rng);
 
         let mut t = IntervalTree::with_capacity(10000);
         for &x in &xs[..100] {
@@ -503,4 +520,14 @@ mod tests {
             i+=1;
         });
     }
+
+    #[test]
+    #[should_panic]
+    fn rb_insert_bad() {
+        let mut t = IntervalTree::new();
+        t.insert_nonoverlapping(0, 1, 1);
+        t.insert_nonoverlapping(0, 1, 1);
+    }
 }
+
+
