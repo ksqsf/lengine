@@ -13,6 +13,10 @@
 //! This mod is intentionally named "flex" instead of the more general
 //! "cache" to avoid confusion.
 
+#![allow(unused)]
+
+mod interval_tree;
+
 use std::io::{Read, Write, Seek};
 use std::io::{SeekFrom, Result};
 
@@ -82,3 +86,4 @@ where F: Read + Write + Seek
         unimplemented!()
     }
 }
+
