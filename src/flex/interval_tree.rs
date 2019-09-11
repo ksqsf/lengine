@@ -11,6 +11,8 @@
 
 use std::cmp::Ordering::*;
 use slab::Slab;
+use std::mem;
+use std::ptr;
 
 /// This trait defines a merge operator, which is used to merge a pair
 /// of values of the same type into a single value.
@@ -175,8 +177,134 @@ where
         self.repair_after_insert(id);
     }
 
-    pub fn remove(&mut self) {
+    /// Remove node del from the tree.
+    pub fn remove(&mut self, del: Index) {
+        let repl = self.smallest_right(del);
+
+        if repl.is_none() && self.node(del).l.is_none() {
+            self.free(del);
+            self.root = None;
+        } else if repl.is_none() && self.node(del).l.is_some() {
+            self.free(del);
+            self.root = self.node(del).l;
+            self.root_mut().unwrap().1.p = None;
+        }
+
+        // Swap del and r, moving down the del to a better place.
+        // Then delete r (was del).
+        let r = repl.unwrap();
+        self.swap(del, r);
+        self.delete_one(r);
+
+        // Maintain.
         unimplemented!()
+    }
+
+    /// Swaps the contents of node p and q, keeping the original index
+    /// and pointer.
+    fn swap(&mut self, p: Index, q: Index) {
+        unsafe {
+            ptr::swap(&mut self.tree[p], &mut self.tree[q]);
+            ptr::swap(&mut self.tree[p].p, &mut self.tree[q].p);
+        }
+    }
+
+    /// Delete a node with only right child or no children.
+    ///
+    /// `left` indicates whether n is the left child (-1), or right child (1).
+    fn delete_one(&mut self, n: Index) {
+        let r = self.node(n).r; // right child of n, taking place of n
+
+        // n is Red, so no children. n is safely deleted.
+        if self.node(n).color == Red {
+            self.free(n);
+            return
+        }
+
+        // r takes the place of n.
+        if let Some(r) = r {
+            self.replace(n, r);
+            self.free(n);
+        }
+
+        // n is Black
+        self.bubble_black(r.unwrap());
+    }
+
+    /// Node n is colored double black. Bubble the extraneous black up
+    /// until it's consumed.
+    fn bubble_black(&mut self, mut n: Index) {
+        loop {
+            if self.node(n).p.is_none() {
+                break
+            } else if self.node(n).color == Red {
+                self.node_mut(n).color = Black;
+                break
+            }
+
+            // n is Black and is not root
+            let (s, p) = self.sibling_and_parent(n).unwrap();
+            let p_color = self.node(p).color;
+            let sl = self.node(s).l;
+            let sr = self.node(s).r;
+
+            if self.node(s).color == Red {
+                self.rotate_up(s);
+                self.node_mut(s).color = Black;
+                self.node_mut(p).color = Red;
+                continue
+            } else if sl.is_some() && self.node(sl.unwrap()).color == Red {
+                self.rotate_up(sl.unwrap());
+                self.rotate_up(sl.unwrap());
+                self.node_mut(sl.unwrap()).color = p_color;
+                break
+            } else if sr.is_some() && self.node(sr.unwrap()).color == Red {
+                self.rotate_up(s);
+                self.node_mut(s).color = p_color;
+                self.node_mut(sr.unwrap()).color = Black;
+                break
+            } else {
+                self.node_mut(s).color = Red;
+                self.node_mut(p).color = Black;
+                if self.node(p).color == Black {
+                    n = p;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Replace node u with v.
+    ///
+    /// Panics if u is root.
+    fn replace(&mut self, u: Index, v: Index) {
+        let up = self.node(u).p.unwrap();
+        self.node_mut(v).p = Some(up);
+        if self.node(up).l == Some(u) {
+            self.node_mut(up).l = Some(v);
+        } else {
+            self.node_mut(up).r = Some(v);
+        }
+    }
+
+    /// Take node out of slab. This should be the last step of the
+    /// removal of a node. This does not handle any metadata.
+    fn free(&mut self, id: Index) -> Node<K,V> {
+        self.tree.remove(id)
+    }
+
+    fn smallest_right(&self, mut cur: Index) -> Option<Index> {
+        if let Some(r) = self.node(cur).r {
+            cur = r;
+        } else {
+            return None;
+        }
+        while let Some(l) = self.node(cur).l {
+            cur = l;
+        }
+        Some(cur)
     }
 
     /// Find a node by key, and update the info along the path.  It
@@ -214,8 +342,7 @@ where
             None => FindResult::Miss,
             Some(dest) => {
                 let node = self.node(dest);
-                debug_assert!(b >= node.a && a <= node.b);
-                // FIXME: write better code after or_patterns is stabilized.
+                debug_assert!(b > node.a && a < node.b);
                 match (a.cmp(&node.a), b.cmp(&node.b)) {
                     (Equal, Equal) => {
                         return FindResult::Equal(dest)
@@ -239,22 +366,17 @@ where
 
     fn find_overlapping(&self, a: K, b: K) -> Option<Index> {
         let mut cur = self.root;
-
         while let Some(node) = cur {
             let node = self.node(node);
-
-            // b is exclusive so the strict comparison is used here.
             if b > node.a && a < node.b {
                 return cur
             }
-
             if node.l.is_some() && a <= self.node(node.l.unwrap()).m {
                 cur = node.l;
             } else {
                 cur = node.r;
             }
         }
-
         None
     }
 
@@ -315,6 +437,16 @@ where
 
     fn node_mut(&mut self, id: Index) -> &mut Node<K,V> {
         &mut self.tree[id]
+    }
+
+    /// Move the node up by rotating. Panics if is root.
+    fn rotate_up(&mut self, o: Index) {
+        let p = self.node(o).p.unwrap();
+        if Some(o) == self.node(p).l {
+            self.rotate_right(p);
+        } else {
+            self.rotate_left(p);
+        }
     }
 
     /// Panics if o.r is None.
