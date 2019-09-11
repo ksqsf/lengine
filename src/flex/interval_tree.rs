@@ -184,20 +184,24 @@ where
         if repl.is_none() && self.node(del).l.is_none() {
             self.free(del);
             self.root = None;
+            return
         } else if repl.is_none() && self.node(del).l.is_some() {
             self.free(del);
             self.root = self.node(del).l;
             self.root_mut().unwrap().1.p = None;
+            return
         }
 
         // Swap del and r, moving down the del to a better place.
-        // Then delete r (was del).
-        let r = repl.unwrap();
-        self.swap(del, r);
-        self.delete_one(r);
+        let repl = repl.unwrap();
+        self.swap(del, repl);
 
-        // Maintain.
-        unimplemented!()
+        // Then delete repl (was del).
+        self.unlink_one(repl);
+        self.free(repl);
+
+        // Maintain
+        
     }
 
     /// Swaps the contents of node p and q, keeping the original index
@@ -209,22 +213,20 @@ where
         }
     }
 
-    /// Delete a node with only right child or no children.
+    /// Unlink a node with only right child or no children.
     ///
     /// `left` indicates whether n is the left child (-1), or right child (1).
-    fn delete_one(&mut self, n: Index) {
+    fn unlink_one(&mut self, n: Index) {
         let r = self.node(n).r; // right child of n, taking place of n
 
         // n is Red, so no children. n is safely deleted.
         if self.node(n).color == Red {
-            self.free(n);
             return
         }
 
         // r takes the place of n.
         if let Some(r) = r {
             self.replace(n, r);
-            self.free(n);
         }
 
         // n is Black
@@ -287,6 +289,7 @@ where
         } else {
             self.node_mut(up).r = Some(v);
         }
+        self.update(up);
     }
 
     /// Take node out of slab. This should be the last step of the
@@ -793,6 +796,25 @@ mod tests {
             t.insert_nonoverlapping(i, i+1, 0);
             assert_eq!(t.find(i, i+1), FindResult::Equal(i));
             assert_eq!(t.find(i+1, i+2), FindResult::Miss);
+        }
+    }
+
+    #[test]
+    fn rb_remove() {
+        let mut t = IntervalTree::new();
+        for i in 0..10 {
+            t.insert_nonoverlapping(i, i+1, i);
+            sanity_check(&t);
+        }
+        for i in 0..10 {
+            let find = t.find(i, i+1);
+            match find {
+                FindResult::Equal(idx) => {
+                    t.remove(idx);
+                    sanity_check(&t);
+                }
+                e @ _ => { panic!("{:?}", e) }
+            }
         }
     }
 }
