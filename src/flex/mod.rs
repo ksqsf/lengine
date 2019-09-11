@@ -20,6 +20,10 @@ mod interval_tree;
 use std::io::{Read, Write, Seek};
 use std::io::{SeekFrom, Result};
 
+use bytes::BytesMut;
+
+use interval_tree::{Merge, Split};
+
 /// Default flex size.  This value is big enough to cover many common
 /// cases.
 pub const DEFAULT_FLEX_SIZE: usize = 64 * 1024 * 1024;
@@ -87,3 +91,19 @@ where F: Read + Write + Seek
     }
 }
 
+impl Merge for BytesMut {
+    fn merge_right(&mut self, rhs: BytesMut) {
+        self.unsplit(rhs);
+    }
+
+    fn merge_left(&mut self, mut lhs: BytesMut) {
+        unimplemented!();
+    }
+}
+
+impl Split<u64> for BytesMut {
+    fn split(mut self, pos: u64) -> (BytesMut, BytesMut) {
+        let split = self.split_off(pos as usize);
+        (self, split)
+    }
+}

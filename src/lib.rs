@@ -1,5 +1,5 @@
-#![feature(bufreader_seek_relative)]
 #![feature(test)]
+#![feature(bufreader_seek_relative)]
 
 pub type RowId = u32;
 pub type Offset = u64;

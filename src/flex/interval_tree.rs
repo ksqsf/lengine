@@ -15,15 +15,17 @@ use slab::Slab;
 /// This trait defines a merge operator, which is used to merge a pair
 /// of values of the same type into a single value.
 pub trait Merge {
-    fn merge(self, rhs: Self) -> Self;
+    /// lhs * self
+    fn merge_left(&mut self, lhs: Self);
+
+    /// self * rhs
+    fn merge_right(&mut self, rhs: Self);
 }
 
 /// This trait defines a split operator, which is used to split a
 /// value into a pair of values of the same type.
-pub trait Split: Sized {
-    type Position;
-
-    fn split(self, pos: Self::Position) -> (Self, Self);
+pub trait Split<Pos>: Sized {
+    fn split(self, pos: Pos) -> (Self, Self);
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -35,10 +37,30 @@ use Color::*;
 
 pub type Index = usize;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FindResult {
-    Hit(Index),
+    ///     ====
+    /// --      --
     Miss,
-    Partial(Index),
+
+    /// Equal
+    Equal(Index),
+
+    ///   ===
+    /// ------
+    Outside(Index),
+
+    /// ====
+    ///  --
+    Inside(Index),
+
+    ///  ====
+    /// --
+    Left(Index),
+
+    /// ====
+    ///   ---
+    Right(Index),
 }
 
 pub enum FindKey {
@@ -51,7 +73,7 @@ pub enum FindKey {
 pub struct IntervalTree<K, V>
 where
     K: Eq + Ord + Copy,
-    V: Clone,
+    V: Clone + Merge,
 {
     root: Option<Index>,
     tree: Slab<Node<K, V>>,
@@ -62,7 +84,7 @@ where
 struct Node<K, V>
 where
     K: Eq + Ord + Copy,
-    V: Clone,
+    V: Clone + Merge,
 {
     color: Color,
     a: K, // key
@@ -77,7 +99,7 @@ where
 impl<K,V> IntervalTree<K,V>
 where
     K: Eq + Ord + Copy,
-    V: Clone,
+    V: Clone + Merge,
 {
     pub fn new() -> IntervalTree<K,V> {
         Self::with_capacity(0)
@@ -90,13 +112,34 @@ where
         }
     }
 
-    /// Insert a new interval; if there's an overlapping, merge with
-    /// it.
+    /// Insert a new interval; if there's an overlapping interval,
+    /// merge with it.
     pub fn insert(&mut self, a: K, b: K, value: V) {
-        self.insert_nonoverlapping(a, b, value)
+        match self.find(a, b) {
+            FindResult::Miss => {
+                self.insert_nonoverlapping(a, b, value)
+            }
+            FindResult::Left(n) => {
+                unimplemented!()
+            }
+            FindResult::Right(n) => {
+                unimplemented!()
+            }
+            FindResult::Outside(n) => {
+                unimplemented!()
+            }
+            FindResult::Inside(n) => {
+                unimplemented!()
+            }
+            FindResult::Equal(n) => {
+                self.node_mut(n).value = value;
+            }
+        }
     }
 
     /// Insert a new interval into this tree.
+    ///
+    /// This interval [a,b) should not overlap with any intervals.
     pub fn insert_nonoverlapping(&mut self, a: K, b: K, value: V) {
         assert!(b > a);
 
@@ -164,13 +207,55 @@ where
         }
     }
 
+    /// Find an interval overlapping with [a, b) quickly.
     pub fn find(&self, a: K, b: K) -> FindResult {
-        let maybe = self.root()
-            .map(|(id, x)| x.find(id, &self.tree, a, b));
-        match maybe {
-            Some(result) => result,
+        let dest = self.find_overlapping(a, b);
+        match dest {
             None => FindResult::Miss,
+            Some(dest) => {
+                let node = self.node(dest);
+                debug_assert!(b >= node.a && a <= node.b);
+                // FIXME: write better code after or_patterns is stabilized.
+                match (a.cmp(&node.a), b.cmp(&node.b)) {
+                    (Equal, Equal) => {
+                        return FindResult::Equal(dest)
+                    }
+                    (Less, Greater) | (Less, Equal) | (Equal, Greater) => {
+                        return FindResult::Outside(dest)
+                    }
+                    (Greater, Less) | (Greater, Equal) | (Equal, Less) => {
+                        return FindResult::Inside(dest)
+                    }
+                    (Less, Less) => {
+                        return FindResult::Left(dest)
+                    }
+                    (Greater, Greater) => {
+                        return FindResult::Right(dest)
+                    }
+                }
+            }
         }
+    }
+
+    fn find_overlapping(&self, a: K, b: K) -> Option<Index> {
+        let mut cur = self.root;
+
+        while let Some(node) = cur {
+            let node = self.node(node);
+
+            // b is exclusive so the strict comparison is used here.
+            if b > node.a && a < node.b {
+                return cur
+            }
+
+            if node.l.is_some() && a <= self.node(node.l.unwrap()).m {
+                cur = node.l;
+            } else {
+                cur = node.r;
+            }
+        }
+
+        None
     }
 
     fn root(&self) -> Option<(Index, &Node<K,V>)> {
@@ -225,11 +310,11 @@ where
     }
 
     fn node(&self, id: Index) -> &Node<K,V> {
-        &self.tree[id as usize]
+        &self.tree[id]
     }
 
     fn node_mut(&mut self, id: Index) -> &mut Node<K,V> {
-        &mut self.tree[id as usize]
+        &mut self.tree[id]
     }
 
     /// Panics if o.r is None.
@@ -326,7 +411,7 @@ where
 impl<K,V> Node<K,V>
 where
     K: Eq + Ord + Copy,
-    V: Clone,
+    V: Clone + Merge,
 {
     fn new(a: K, b: K, value: V) -> Node<K,V> {
         Node {
@@ -351,6 +436,16 @@ mod tests {
     extern crate test;
     use test::Bencher;
     use super::*;
+
+    impl Merge for i32 {
+        fn merge_left(&mut self, lhs: i32) {
+            *self += lhs
+        }
+
+        fn merge_right(&mut self, rhs: i32) {
+            *self += rhs
+        }
+    }
 
     fn print_tree(t: &IntervalTree<i32, i32>, cur: Option<Index>, level: u32) {
         if let Some(cur) = cur {
@@ -415,7 +510,7 @@ mod tests {
     }
 
     fn count_black<K,V>(t: &IntervalTree<K,V>, cur: Option<Index>) -> u32
-    where K: Ord + Copy + Eq, V: Clone,
+    where K: Ord + Copy + Eq, V: Clone + Merge,
     {
         match cur {
             None => 1,
@@ -436,19 +531,19 @@ mod tests {
         let mut t = IntervalTree::new();
         sanity_check(&t);
 
-        t.insert(10, 100, 0); // 0
+        t.insert(10, 11, 0); // 0
         sanity_check(&t);
 
-        t.insert(11, 100, 0); // 1
+        t.insert(11, 12, 0); // 1
         sanity_check(&t);
 
-        t.insert(6, 100, 0); // 2
+        t.insert(6, 7, 0); // 2
         sanity_check(&t);
 
-        t.insert(4, 100, 0); // 3
+        t.insert(4, 5, 0); // 3
         sanity_check(&t);
 
-        t.insert(2, 100, 0); // 4
+        t.insert(2, 3, 0); // 4
         sanity_check(&t);
     }
 
@@ -457,19 +552,19 @@ mod tests {
         let mut t = IntervalTree::new();
         assert_eq!(t.root, None);
 
-        t.insert(10, 100, 0); // 0
+        t.insert(10, 11, 0); // 0
         sanity_check(&t);
 
-        t.insert(11, 100, 0); // 1
+        t.insert(11, 12, 0); // 1
         sanity_check(&t);
 
-        t.insert(5, 100, 0); // 2
+        t.insert(5, 6, 0); // 2
         sanity_check(&t);
 
-        t.insert(7, 100, 0); // 3
+        t.insert(7, 8, 0); // 3
         sanity_check(&t);
 
-        t.insert(6, 100, 0); // 4
+        t.insert(6, 7, 0); // 4
         sanity_check(&t);
     }
 
@@ -485,15 +580,15 @@ mod tests {
         let mut t = IntervalTree::with_capacity(10000);
         for &x in &xs[..100] {
             t.insert(x, x + 1, 0);
-            println!("");
-            print_tree(&t, t.root, 0);
+            // println!("");
+            // print_tree(&t, t.root, 0);
             sanity_check(&t);
         }
 
         for &x in &xs[100..10000] {
             t.insert(x, x + 1, 0);
         }
-        print_tree(&t, t.root, 0);
+        // print_tree(&t, t.root, 0);
         sanity_check(&t);
     }
 
@@ -528,6 +623,44 @@ mod tests {
         t.insert_nonoverlapping(0, 1, 1);
         t.insert_nonoverlapping(0, 1, 1);
     }
+
+    #[test]
+    fn interval_find() {
+        let mut t = IntervalTree::new();
+        t.insert_nonoverlapping(10, 20, 0); // 0
+        t.insert_nonoverlapping(20, 40, 0); // 1
+        t.insert_nonoverlapping(60, 80, 0); // 2
+        t.insert_nonoverlapping(80, 100, 0); // 3
+        t.insert_nonoverlapping(100, 120, 0); // 4
+        t.insert_nonoverlapping(140, 160, 0); // 5
+        t.insert_nonoverlapping(180, 200, 0); // 6
+        t.insert_nonoverlapping(220, 240, 0); // 7
+
+        assert_eq!(t.find(0, 4), FindResult::Miss);
+        assert_eq!(t.find(1, 10), FindResult::Miss);
+        assert_eq!(t.find(219, 220), FindResult::Miss);
+
+        assert_eq!(t.find(10, 20), FindResult::Equal(0));
+        assert_eq!(t.find(9, 20), FindResult::Outside(0));
+        assert_eq!(t.find(10, 19), FindResult::Inside(0));
+        assert_eq!(t.find(21, 22), FindResult::Inside(1));
+        assert_eq!(t.find(20, 22), FindResult::Inside(1));
+        assert_eq!(t.find(61, 79), FindResult::Inside(2));
+        assert_eq!(t.find(239, 240), FindResult::Inside(7));
+
+        assert_eq!(t.find(9, 21), FindResult::Left(1));
+        assert_eq!(t.find(219, 221), FindResult::Left(7));
+        assert_eq!(t.find(239, 241), FindResult::Right(7));
+    }
+
+    #[test]
+    fn interval_find_seq_1k() {
+        let mut t = IntervalTree::new();
+
+        for i in 0..1000 {
+            t.insert_nonoverlapping(i, i+1, 0);
+            assert_eq!(t.find(i, i+1), FindResult::Equal(i));
+            assert_eq!(t.find(i+1, i+2), FindResult::Miss);
+        }
+    }
 }
-
-
