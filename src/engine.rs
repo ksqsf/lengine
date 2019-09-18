@@ -1,12 +1,11 @@
 use std::io::{Result, Error, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::fs;
-use std::cell::Cell;
 use std::collections::HashMap;
 use libc::ENOTDIR;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-
-use crate::{Index, Log, RowId, Offset};
+use crate::{Index, Log, RowId};
 use crate::index::Transaction as IndexTx;
 use crate::log::Transaction as LogTx;
 
@@ -17,8 +16,8 @@ pub struct Engine {
 
     info: HashMap<String, Vec<u8>>,
 
-    last_row: Cell<RowId>,
-    last_offset: Cell<Offset>,
+    last_row: AtomicU32,
+    last_offset: AtomicU64,
 }
 
 impl Engine {
@@ -58,8 +57,8 @@ impl Engine {
             index,
             log,
             info: HashMap::new(),
-            last_row: Cell::new(0),
-            last_offset: Cell::new(0),
+            last_row: Default::default(),
+            last_offset: Default::default(),
         })
     }
 
@@ -79,13 +78,13 @@ impl Engine {
                 // FIXME: this optimization is too simple.
 
                 // If this read is sequential, don't seek.
-                if row != self.last_row.get() + 1 {
+                if row != self.last_row.load(Ordering::SeqCst) + 1 {
                     self.log.seek(SeekFrom::Start(offset))?;
                 }
                 self.log.read(&mut buf[..])?;
 
-                self.last_row.set(row);
-                self.last_offset.set(offset);
+                self.last_row.fetch_add(row, Ordering::SeqCst);
+                self.last_offset.fetch_add(offset, Ordering::SeqCst);
                 return Ok(Some(buf))
             }
             None => Ok(None),
