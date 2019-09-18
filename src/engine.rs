@@ -107,6 +107,8 @@ impl Engine {
         Ok(Transaction {
             log_tx: self.log.transaction()?,
             index_tx: self.index.transaction(),
+            info: &mut self.info,
+            info_updates: HashMap::new(),
         })
     }
 
@@ -119,6 +121,8 @@ impl Engine {
 pub struct Transaction<'a> {
     log_tx: LogTx<'a>,
     index_tx: IndexTx<'a>,
+    info: &'a mut HashMap<String, Vec<u8>>,
+    info_updates: HashMap<String, Vec<u8>>,
 }
 
 impl<'a> Transaction<'a> {
@@ -126,9 +130,16 @@ impl<'a> Transaction<'a> {
         Ok(self.index_tx.append(self.log_tx.append(entry)?))
     }
 
+    pub fn put_info(&mut self, key: String, value: Vec<u8>) {
+        self.info_updates.insert(key, value);
+    }
+
     pub fn commit(self) -> Result<()> {
         self.log_tx.commit()?;
         self.index_tx.commit()?;
+        for (k, v) in self.info_updates {
+            self.info.insert(k, v);
+        }
         Ok(())
     }
 }
