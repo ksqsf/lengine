@@ -16,7 +16,7 @@ pub struct Engine {
     index: Index,
     log: Log,
 
-    info: HashMap<String, Box<[u8]>>,
+    info: HashMap<Box<[u8]>, Box<[u8]>>,
 
     last_row: AtomicU32,
     last_offset: AtomicU64,
@@ -113,7 +113,7 @@ impl Engine {
     }
 
     /// Get extra info.
-    pub fn info(&self) -> &HashMap<String, Box<[u8]>> {
+    pub fn info(&self) -> &HashMap<Box<[u8]>, Box<[u8]>> {
         &self.info
     }
 }
@@ -121,8 +121,8 @@ impl Engine {
 pub struct Transaction<'a> {
     log_tx: LogTx<'a>,
     index_tx: IndexTx<'a>,
-    info: &'a mut HashMap<String, Box<[u8]>>,
-    info_updates: HashMap<String, Box<[u8]>>,
+    info: &'a mut HashMap<Box<[u8]>, Box<[u8]>>,
+    info_updates: HashMap<Box<[u8]>, Box<[u8]>>,
 }
 
 impl<'a> Transaction<'a> {
@@ -130,8 +130,9 @@ impl<'a> Transaction<'a> {
         Ok(self.index_tx.append(self.log_tx.append(entry)?))
     }
 
-    pub fn put_info(&mut self, key: &str, value: &[u8]) {
-        self.info_updates.insert(key.to_owned(), Vec::from(value).into_boxed_slice());
+    pub fn put_info(&mut self, key: &[u8], value: &[u8]) {
+        self.info_updates.insert(Vec::from(key).into_boxed_slice(),
+                                 Vec::from(value).into_boxed_slice());
     }
 
     pub fn commit(self) -> Result<()> {
