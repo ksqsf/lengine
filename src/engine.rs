@@ -2,6 +2,7 @@ use std::io::{Result, Error, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::cell::Cell;
+use std::collections::HashMap;
 use libc::ENOTDIR;
 
 
@@ -13,6 +14,8 @@ use crate::log::Transaction as LogTx;
 pub struct Engine {
     index: Index,
     log: Log,
+
+    info: HashMap<String, Vec<u8>>,
 
     last_row: Cell<RowId>,
     last_offset: Cell<Offset>,
@@ -33,7 +36,7 @@ impl Engine {
             fs::create_dir(path.as_ref())?;
         }
 
-        // TODO: Lock.
+        // TODO: Lock the db.
 
         // Open the index file.
         let index_path = {
@@ -54,6 +57,7 @@ impl Engine {
         Ok(Engine {
             index,
             log,
+            info: HashMap::new(),
             last_row: Cell::new(0),
             last_offset: Cell::new(0),
         })
@@ -71,6 +75,8 @@ impl Engine {
 
                 // FIXME: `get` should not take &mut self, but seek
                 // and read require that.
+
+                // FIXME: this optimization is too simple.
 
                 // If this read is sequential, don't seek.
                 if row != self.last_row.get() + 1 {
@@ -102,6 +108,11 @@ impl Engine {
             log_tx: self.log.transaction()?,
             index_tx: self.index.transaction(),
         })
+    }
+
+    /// Get extra info.
+    pub fn info(&mut self) -> &mut HashMap<String, Vec<u8>> {
+        &mut self.info
     }
 }
 
