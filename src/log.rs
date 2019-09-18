@@ -6,6 +6,8 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write, Result, Seek, SeekFrom, BufReader, BufWriter};
 use std::path::Path;
+use byteorder::WriteBytesExt;
+use byteorder::LittleEndian;
 
 use crate::Offset;
 
@@ -87,6 +89,7 @@ impl<'a> Transaction<'a> {
         // FIXME: how should we align entries?
         // Note, `seek` will invalidate the buffer.
         let offset = self.tail;
+        self.writer.write_u64::<LittleEndian>(entry.len() as u64)?;
         self.writer.write_all(entry)?;
         self.tail += entry.len() as u64;
         Ok(offset)

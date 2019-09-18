@@ -4,6 +4,8 @@ use std::fs;
 use std::collections::HashMap;
 use libc::ENOTDIR;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use byteorder::LittleEndian;
+use byteorder::ReadBytesExt;
 
 use crate::{Index, Log, RowId};
 use crate::index::Transaction as IndexTx;
@@ -66,12 +68,9 @@ impl Engine {
     ///
     /// Precisely, this method just reads the log file at a certain
     /// offset.
-    pub fn get(&mut self, row: RowId, size: usize) -> Result<Option<Vec<u8>>> {
+    pub fn get(&mut self, row: RowId) -> Result<Option<Vec<u8>>> {
         match self.index.get(row)? {
             Some(offset) => {
-                let mut buf = Vec::with_capacity(size);
-                unsafe { buf.set_len(size); }
-
                 // FIXME: `get` should not take &mut self, but seek
                 // and read require that.
 
@@ -81,10 +80,12 @@ impl Engine {
                 if row != self.last_row.load(Ordering::SeqCst) + 1 {
                     self.log.seek(SeekFrom::Start(offset))?;
                 }
+                let len = self.log.read_u64::<LittleEndian>()?;
+                let mut buf = vec![0; len as usize];
                 self.log.read(&mut buf[..])?;
 
                 self.last_row.fetch_add(row, Ordering::SeqCst);
-                self.last_offset.fetch_add(offset, Ordering::SeqCst);
+                self.last_offset.fetch_add(len, Ordering::SeqCst);
                 return Ok(Some(buf))
             }
             None => Ok(None),
