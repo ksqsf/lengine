@@ -16,7 +16,7 @@ pub struct Engine {
     index: Index,
     log: Log,
 
-    info: HashMap<String, Vec<u8>>,
+    info: HashMap<String, Box<[u8]>>,
 
     last_row: AtomicU32,
     last_offset: AtomicU64,
@@ -68,7 +68,7 @@ impl Engine {
     ///
     /// Precisely, this method just reads the log file at a certain
     /// offset.
-    pub fn get(&mut self, row: RowId) -> Result<Option<Vec<u8>>> {
+    pub fn get(&mut self, row: RowId) -> Result<Option<Box<[u8]>>> {
         match self.index.get(row)? {
             Some(offset) => {
                 // FIXME: `get` should not take &mut self, but seek
@@ -86,7 +86,7 @@ impl Engine {
 
                 self.last_row.fetch_add(row, Ordering::SeqCst);
                 self.last_offset.fetch_add(len, Ordering::SeqCst);
-                return Ok(Some(buf))
+                return Ok(Some(buf.into_boxed_slice()))
             }
             None => Ok(None),
         }
@@ -113,7 +113,7 @@ impl Engine {
     }
 
     /// Get extra info.
-    pub fn info(&self) -> &HashMap<String, Vec<u8>> {
+    pub fn info(&self) -> &HashMap<String, Box<[u8]>> {
         &self.info
     }
 }
@@ -121,8 +121,8 @@ impl Engine {
 pub struct Transaction<'a> {
     log_tx: LogTx<'a>,
     index_tx: IndexTx<'a>,
-    info: &'a mut HashMap<String, Vec<u8>>,
-    info_updates: HashMap<String, Vec<u8>>,
+    info: &'a mut HashMap<String, Box<[u8]>>,
+    info_updates: HashMap<String, Box<[u8]>>,
 }
 
 impl<'a> Transaction<'a> {
@@ -130,8 +130,8 @@ impl<'a> Transaction<'a> {
         Ok(self.index_tx.append(self.log_tx.append(entry)?))
     }
 
-    pub fn put_info(&mut self, key: String, value: Vec<u8>) {
-        self.info_updates.insert(key, value);
+    pub fn put_info(&mut self, key: &str, value: &[u8]) {
+        self.info_updates.insert(key.to_owned(), Vec::from(value).into_boxed_slice());
     }
 
     pub fn commit(self) -> Result<()> {
