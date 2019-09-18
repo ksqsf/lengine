@@ -113,8 +113,8 @@ impl Engine {
     }
 
     /// Get extra info.
-    pub fn info(&mut self) -> &mut HashMap<String, Vec<u8>> {
-        &mut self.info
+    pub fn info(&self) -> &HashMap<String, Vec<u8>> {
+        &self.info
     }
 }
 
