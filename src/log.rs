@@ -4,7 +4,7 @@
 //! file. Its main purpose is to provide fast random reads.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, Result, Seek, SeekFrom, BufReader, BufWriter};
+use std::io::{Read, Write, Result, Seek, SeekFrom, BufWriter};
 use std::path::Path;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian;
@@ -20,9 +20,6 @@ const DEFAULT_WRITE_BUF_SIZE: usize = 64 * 1024 * 1024;
 pub struct Log {
     /// The raw file handle.
     file: File,
-
-    /// A buffered reader for the log file.
-    reader: BufReader<File>,
 }
 
 impl Log {
@@ -33,10 +30,8 @@ impl Log {
             .create(true)
             .read(true)
             .open(path)?;
-        let reader = BufReader::with_capacity(DEFAULT_READ_BUF_SIZE, file.try_clone()?);
         Ok(Log {
             file,
-            reader,
         })
     }
 
@@ -52,10 +47,6 @@ impl Log {
         })
     }
 
-    pub fn seek_relative(&mut self, offset: i64) -> Result<()> {
-        self.reader.seek_relative(offset)
-    }
-
     /// Try to write the data to the log file, and make sure the
     /// writes do happen.
     fn sync_data(&mut self)  -> Result<()> {
@@ -64,16 +55,21 @@ impl Log {
 }
 
 impl Read for Log {
+    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.reader.read(buf)
+        self.file.read(buf)
     }
 }
 
 impl Seek for Log {
     /// This method use be used with care. It will discard the reader
     /// buffer.
+    #[inline]
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
-        self.reader.seek(pos)
+        self.file.seek(pos)
+    }
+}
+
     }
 }
 
