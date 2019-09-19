@@ -1,7 +1,9 @@
 //! # Log
 //!
 //! The log mod provides an abstraction over the underlying log
-//! file. Its main purpose is to provide fast random reads.
+//! file. Its main purpose is to provide fast random reads, based on a
+//! flex cache wrapper (todo). Right now, it's the same as a
+//! std::fs::File.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write, Result, Seek, SeekFrom, BufWriter};
