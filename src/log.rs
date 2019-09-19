@@ -8,9 +8,11 @@ use std::io::{Read, Write, Result, Seek, SeekFrom, BufWriter};
 use std::path::Path;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian;
+use positioned_io::ReadAt;
 
 use crate::Offset;
 
+#[allow(unused)]
 const DEFAULT_READ_BUF_SIZE: usize = 1024;
 const DEFAULT_WRITE_BUF_SIZE: usize = 64 * 1024 * 1024;
 
@@ -70,6 +72,10 @@ impl Seek for Log {
     }
 }
 
+impl ReadAt for Log {
+    #[inline]
+    fn read_at(&self, pos: u64, buf: &mut [u8]) -> Result<usize> {
+        self.file.read_at(pos, buf)
     }
 }
 

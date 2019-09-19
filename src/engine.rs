@@ -1,11 +1,10 @@
-use std::io::{Result, Error, Read, Seek, SeekFrom};
+use std::io::{Result, Error};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use byteorder::LittleEndian;
-use byteorder::ReadBytesExt;
 use libc::{ENOTDIR, EBUSY};
+use byteorder::LE;
+use positioned_io::{ReadAt, ReadBytesAtExt};
 
 use crate::{Index, Log, RowId};
 use crate::index::Transaction as IndexTx;
@@ -18,9 +17,6 @@ pub struct Engine {
     lock_path: PathBuf,
 
     info: HashMap<Box<[u8]>, Box<[u8]>>,
-
-    last_row: AtomicU32,
-    last_offset: AtomicU64,
 }
 
 impl Engine {
@@ -70,8 +66,6 @@ impl Engine {
             index,
             log,
             info: HashMap::new(),
-            last_row: Default::default(),
-            last_offset: Default::default(),
             lock_path,
         })
     }
@@ -80,24 +74,12 @@ impl Engine {
     ///
     /// Precisely, this method just reads the log file at a certain
     /// offset.
-    pub fn get(&mut self, row: RowId) -> Result<Option<Box<[u8]>>> {
+    pub fn get(&self, row: RowId) -> Result<Option<Box<[u8]>>> {
         match self.index.get(row)? {
             Some(offset) => {
-                // FIXME: `get` should not take &mut self, but seek
-                // and read require that.
-
-                // FIXME: this optimization is too simple.
-
-                // If this read is sequential, don't seek.
-                if row != self.last_row.load(Ordering::SeqCst) + 1 {
-                    self.log.seek(SeekFrom::Start(offset))?;
-                }
-                let len = self.log.read_u64::<LittleEndian>()?;
+                let len = self.log.read_u64_at::<LE>(offset)?;
                 let mut buf = vec![0; len as usize];
-                self.log.read(&mut buf[..])?;
-
-                self.last_row.fetch_add(row, Ordering::SeqCst);
-                self.last_offset.fetch_add(len, Ordering::SeqCst);
+                self.log.read_at(offset + std::mem::size_of::<u64>() as u64, &mut buf[..])?;
                 return Ok(Some(buf.into_boxed_slice()))
             }
             None => Ok(None),
@@ -197,7 +179,6 @@ mod tests {
         // Data
         let n = 1_000_000;
         let text = b"yuck".as_ref();
-        let text_len = text.len();
 
         // Write data
         let mut engine = Engine::open("db1").unwrap();
@@ -212,17 +193,17 @@ mod tests {
 
         // Instant verification
         for row in &rows {
-            let data = engine.get(*row, text_len).unwrap().unwrap();
-            assert_eq!(data.as_slice(), text);
+            let data = engine.get(*row).unwrap().unwrap();
+            assert_eq!(data.as_ref(), text);
         }
 
         // Re-read
         drop(engine);
-        let mut engine = Engine::open("db1").unwrap();
+        let engine = Engine::open("db1").unwrap();
         assert_eq!(engine.count(), rows.len());
         for i in 0..engine.count() {
-            let data = engine.get(i as u32, text_len).unwrap().unwrap();
-            assert_eq!(data.as_slice(), text);
+            let data = engine.get(i as u32).unwrap().unwrap();
+            assert_eq!(data.as_ref(), text);
         }
 
         fs::remove_dir_all("db1").unwrap();
