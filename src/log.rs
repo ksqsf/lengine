@@ -6,6 +6,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write, Result, Seek, SeekFrom, BufWriter};
 use std::path::Path;
+use std::mem;
 use byteorder::WriteBytesExt;
 use byteorder::LittleEndian;
 use positioned_io::ReadAt;
@@ -93,7 +94,7 @@ impl<'a> Transaction<'a> {
         let offset = self.tail;
         self.writer.write_u64::<LittleEndian>(entry.len() as u64)?;
         self.writer.write_all(entry)?;
-        self.tail += entry.len() as u64;
+        self.tail += (mem::size_of::<usize>() + entry.len()) as u64;
         Ok(offset)
     }
 
@@ -136,7 +137,7 @@ mod tests {
         let mut offsets = Vec::with_capacity(n);
         for i in 0..n {
             let offset = tx.append(text).unwrap();
-            assert_eq!(offset, (i * text.len()) as u64);
+            assert_eq!(offset, (i * (mem::size_of::<usize>() + text.len())) as u64);
             offsets.push(offset);
         }
         tx.commit().unwrap();
@@ -145,11 +146,11 @@ mod tests {
         drop(log);
         let mut log = Log::open(filename).unwrap();
         log.seek(SeekFrom::Start(0)).unwrap();
-        let mut buf = [0; 14];
+        let mut buf = [0; 8 + 14];
         assert_eq!(text.len(), 14);
         for _ in 0..n {
             log.read_exact(&mut buf).unwrap();
-            assert_eq!(&buf[..], &text[..]);
+            assert_eq!(&buf[8..], &text[..]);
         }
 
         fs::remove_file(filename).unwrap();
