@@ -2,10 +2,10 @@ use std::io::{Result, Error, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashMap;
-use libc::ENOTDIR;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use byteorder::LittleEndian;
 use byteorder::ReadBytesExt;
+use libc::{ENOTDIR, EBUSY};
 
 use crate::{Index, Log, RowId};
 use crate::index::Transaction as IndexTx;
@@ -15,6 +15,7 @@ use crate::log::Transaction as LogTx;
 pub struct Engine {
     index: Index,
     log: Log,
+    lock_path: PathBuf,
 
     info: HashMap<Box<[u8]>, Box<[u8]>>,
 
@@ -37,7 +38,17 @@ impl Engine {
             fs::create_dir(path.as_ref())?;
         }
 
-        // TODO: Lock the db.
+        // Check and create the lock file.
+        let lock_path = {
+            let mut buf = PathBuf::from(path.as_ref());
+            buf.push("LOCK");
+            buf
+        };
+        if Path::exists(&lock_path) {
+            return Err(Error::from_raw_os_error(EBUSY));
+        } else {
+            fs::OpenOptions::new().create(true).write(true).open(&lock_path)?;
+        }
 
         // Open the index file.
         let index_path = {
@@ -61,6 +72,7 @@ impl Engine {
             info: HashMap::new(),
             last_row: Default::default(),
             last_offset: Default::default(),
+            lock_path,
         })
     }
 
@@ -118,6 +130,12 @@ impl Engine {
     }
 }
 
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.lock_path);
+    }
+}
+
 pub struct Transaction<'a> {
     log_tx: LogTx<'a>,
     index_tx: IndexTx<'a>,
@@ -160,6 +178,16 @@ mod tests {
             Engine::open("dbopen").unwrap();
         }
         fs::remove_dir_all("dbopen").unwrap();
+    }
+
+    #[test]
+    fn open_locked() {
+        ensure_dir_nonexistent("dbopen2");
+        let logf = Engine::open("dbopen2").unwrap();
+        assert!(Engine::open("dbopen2").is_err());
+        drop(logf);
+        assert!(Engine::open("dbopen2").is_ok());
+        fs::remove_dir_all("dbopen2").unwrap();
     }
 
     #[test]
