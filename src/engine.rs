@@ -110,6 +110,14 @@ impl Engine {
     pub fn info(&self) -> &HashMap<Box<[u8]>, Box<[u8]>> {
         &self.info
     }
+
+    /// Reset the whole database, drop all existing entries and index,
+    /// and possibibly truncate the log file and the index file.
+    pub fn reset(&mut self) -> Result<()> {
+        self.log.reset()?;
+        self.index.reset()?;
+        Ok(())
+    }
 }
 
 impl Drop for Engine {

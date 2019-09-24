@@ -76,6 +76,11 @@ impl Index {
         self.next_row
     }
 
+    pub fn reset(&mut self) -> Result<()> {
+        self.next_row = 0;
+        Ok(())
+    }
+
     /// Try to write the updated index into the file.
     fn sync_data(&mut self, old_len: usize) -> Result<()> {
         self.file.seek(SeekFrom::End(0))?;

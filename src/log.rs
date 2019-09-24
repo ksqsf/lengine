@@ -52,6 +52,10 @@ impl Log {
         })
     }
 
+    pub fn reset(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     /// Try to write the data to the log file, and make sure the
     /// writes do happen.
     fn sync_data(&mut self)  -> Result<()> {
