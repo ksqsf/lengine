@@ -9,6 +9,7 @@ use positioned_io::{ReadAt, ReadBytesAtExt};
 use crate::{Index, Log, RowId};
 use crate::index::Transaction as IndexTx;
 use crate::log::Transaction as LogTx;
+use crate::log::EntrySize;
 
 /// The log engine.
 pub struct Engine {
@@ -77,9 +78,10 @@ impl Engine {
     pub fn get(&self, row: RowId) -> Result<Option<Box<[u8]>>> {
         match self.index.get(row)? {
             Some(offset) => {
-                let len = self.log.read_u64_at::<LE>(offset)?;
+                unsafe { let _ = std::mem::transmute::<u16, EntrySize>(0); }
+                let len = self.log.read_u16_at::<LE>(offset)?;
                 let mut buf = vec![0; len as usize];
-                self.log.read_at(offset + std::mem::size_of::<u64>() as u64, &mut buf[..])?;
+                self.log.read_at(offset + std::mem::size_of::<u16>() as u64, &mut buf[..])?;
                 return Ok(Some(buf.into_boxed_slice()))
             }
             None => Ok(None),

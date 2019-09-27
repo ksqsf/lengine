@@ -19,6 +19,9 @@ use crate::Offset;
 const DEFAULT_READ_BUF_SIZE: usize = 1024;
 const DEFAULT_WRITE_BUF_SIZE: usize = 64 * 1024 * 1024;
 
+/// The length of an entry must be representable by this type.
+pub(crate) type EntrySize = u16;
+
 /// In-memory representation of a log file.
 ///
 /// Reads and writes should not be mixed.
@@ -95,12 +98,14 @@ pub struct Transaction<'a> {
 
 impl<'a> Transaction<'a> {
     pub fn append(&mut self, entry: &[u8]) -> Result<Offset> {
+        assert!(entry.len() <= EntrySize::max_value() as usize);
+        unsafe { let _ = std::mem::transmute::<u16, EntrySize>(0); }
         // FIXME: how should we align entries?
         // Note, `seek` will invalidate the buffer.
         let offset = self.tail;
-        self.writer.write_u64::<LittleEndian>(entry.len() as u64)?;
+        self.writer.write_u16::<LittleEndian>(entry.len() as EntrySize)?;
         self.writer.write_all(entry)?;
-        self.tail += (mem::size_of::<usize>() + entry.len()) as u64;
+        self.tail += (mem::size_of::<EntrySize>() + entry.len()) as u64;
         Ok(offset)
     }
 
@@ -143,7 +148,7 @@ mod tests {
         let mut offsets = Vec::with_capacity(n);
         for i in 0..n {
             let offset = tx.append(text).unwrap();
-            assert_eq!(offset, (i * (mem::size_of::<usize>() + text.len())) as u64);
+            assert_eq!(offset, (i * (mem::size_of::<EntrySize>() + text.len())) as u64);
             offsets.push(offset);
         }
         tx.commit().unwrap();
@@ -152,13 +157,23 @@ mod tests {
         drop(log);
         let mut log = Log::open(filename).unwrap();
         log.seek(SeekFrom::Start(0)).unwrap();
-        let mut buf = [0; 8 + 14];
+        let mut buf = [0; std::mem::size_of::<EntrySize>() + 14];
         assert_eq!(text.len(), 14);
         for _ in 0..n {
             log.read_exact(&mut buf).unwrap();
-            assert_eq!(&buf[8..], &text[..]);
+            assert_eq!(&buf[2..], &text[..]);
         }
 
         fs::remove_file(filename).unwrap();
     }
+}
+
+trait Bounded {
+    fn max_value() -> Self;
+    fn min_value() -> Self;
+}
+
+impl Bounded for u16 {
+    fn max_value() -> u16 { 65535 }
+    fn min_value() -> u16 { 0 }
 }
