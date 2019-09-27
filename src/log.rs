@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(text.len(), 14);
         for _ in 0..n {
             log.read_exact(&mut buf).unwrap();
-            assert_eq!(&buf[2..], &text[..]);
+            assert_eq!(&buf[std::mem::size_of::<EntrySize>()..], &text[..]);
         }
 
         fs::remove_file(filename).unwrap();
