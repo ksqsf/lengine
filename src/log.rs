@@ -168,12 +168,3 @@ mod tests {
     }
 }
 
-trait Bounded {
-    fn max_value() -> Self;
-    fn min_value() -> Self;
-}
-
-impl Bounded for u16 {
-    fn max_value() -> u16 { 65535 }
-    fn min_value() -> u16 { 0 }
-}
